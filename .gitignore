@@ -1,0 +1,21 @@
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Installed libraries
+scipy/
+randomness_testsuite/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+.env
+
+
+
