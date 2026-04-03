@@ -1,6 +1,6 @@
 """
-MODULE-2 : QRNG vs RNG COMPARISON
----------------------------------
+MODULE-3 : HYBRID QRNG + AES-CTR DRBG
+-------------------------------------
 Trials: 20
 Bits per trial: 1,000,000
 """
@@ -9,9 +9,7 @@ import os
 import sqlite3
 import numpy as np
 import math
-import random
 import time
-import secrets
 from datetime import datetime
 from dotenv import load_dotenv
 from scipy.stats import chisquare
@@ -37,7 +35,7 @@ from randomness_testsuite.Complexity import ComplexityTest
 
 
 DB_FILE="results.db"
-TABLE="final_results"
+TABLE="hybrid_results"
 
 
 # =========================================================
@@ -46,14 +44,13 @@ TABLE="final_results"
 
 def db_setup():
 
-    conn=sqlite3.connect(DB_FILE,timeout=30)
+    conn=sqlite3.connect(DB_FILE)
     cur=conn.cursor()
 
     cur.execute(f"""
     CREATE TABLE IF NOT EXISTS {TABLE}(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     time TEXT,
-    rng TEXT,
     backend TEXT,
     trials INTEGER,
     bits_per_trial INTEGER,
@@ -84,50 +81,16 @@ def db_setup():
 
 
 # =========================================================
-# RNG IMPLEMENTATIONS
+# HYBRID QRNG + AES CTR DRBG
 # =========================================================
 
-def seed_prng():
-    random.seed(int.from_bytes(os.urandom(8),"big"))
+def hybrid_qrng_aes_bits(n):
 
+    # Quantum seed (256 bits)
+    seed_bits=get_bit_string(256)
 
-def get_prng_bits(n):
-    return "".join(str(random.getrandbits(1)) for _ in range(n))
+    key=int(seed_bits,2).to_bytes(32,"big")
 
-
-def get_secrets_bits(n):
-    return "".join(str(secrets.randbits(1)) for _ in range(n))
-
-
-def get_urandom_bits(n):
-    data=os.urandom(n)
-    return "".join(format(b,"08b") for b in data)[:n]
-
-
-# ---------- LCG (weak RNG)
-
-def get_lcg_bits(n):
-
-    a=1664525
-    c=1013904223
-    m=2**32
-
-    x=int.from_bytes(os.urandom(4),"big")
-
-    bits=[]
-
-    for _ in range(n):
-        x=(a*x+c)%m
-        bits.append(str(x&1))
-
-    return "".join(bits)
-
-
-# ---------- AES CTR DRBG
-
-def get_aes_ctr_bits(n):
-
-    key=os.urandom(16)
     nonce=os.urandom(16)
 
     cipher=Cipher(
@@ -157,8 +120,12 @@ def shannon_entropy(bits):
     p1=ones/n
 
     H=0
-    if p0>0: H-=p0*math.log2(p0)
-    if p1>0: H-=p1*math.log2(p1)
+
+    if p0>0:
+        H-=p0*math.log2(p0)
+
+    if p1>0:
+        H-=p1*math.log2(p1)
 
     return H
 
@@ -166,7 +133,9 @@ def shannon_entropy(bits):
 def nist_min_entropy(bits):
 
     n=len(bits)
+
     pmax=max(bits.count("0"),bits.count("1"))/n
+
     return -math.log2(pmax)
 
 
@@ -187,6 +156,7 @@ def collision_entropy(bits):
 # =========================================================
 
 def bit_bias(bits):
+
     return abs((bits.count("0")/len(bits))-0.5)
 
 
@@ -248,10 +218,10 @@ def extract_p(x):
 
 
 # =========================================================
-# RUN TRIALS
+# RUN HYBRID TRIALS
 # =========================================================
 
-def run_trials(name,bit_func,backend):
+def run_trials(backend):
 
     TRIALS=20
     BITS=1000000
@@ -278,15 +248,14 @@ def run_trials(name,bit_func,backend):
     zeros=[]
     ones=[]
 
-    print("\nRunning:",name,"\n")
+    print("\nRunning HYBRID QRNG + AES\n")
 
     for t in range(TRIALS):
 
-        if name=="PRNG_MersenneTwister":
-            seed_prng()
-
         start=time.time()
-        bits=bit_func(BITS)
+
+        bits=hybrid_qrng_aes_bits(BITS)
+
         end=time.time()
 
         times.append(end-start)
@@ -332,35 +301,14 @@ def run_trials(name,bit_func,backend):
 
         print("Trial",t+1,"Entropy:",round(H,10),"PassRate:",round(pass_rate,3))
 
-    print("\n==============================")
-    print("FINAL AVERAGE RESULTS")
-    print("==============================")
-
-    print("Entropy:",round(np.mean(entropy),8))
-    print("MinEntropy:",round(np.mean(min_e),8))
-    print("CollisionEntropy:",round(np.mean(coll),8))
-
-    print("\nBias:",round(np.mean(bias),8))
-    print("Autocorrelation:",format(np.mean(auto),".8f"))
-
-    print("\nZeros:",int(np.mean(zeros)))
-    print("Ones :",int(np.mean(ones)))
-
-    print("\nPassRate:",round(np.mean(pass_rates),3))
-    print("ChiSquare:",round(np.mean(chi_vals),5))
-    print("Predictability:",round(np.mean(pred),5))
-    print("GenerationTime:",round(np.mean(times),3),"seconds")
-
-    print("==============================\n")
-
     conn=sqlite3.connect(DB_FILE)
     cur=conn.cursor()
 
     cur.execute(f"""
     INSERT INTO {TABLE} VALUES (
-    NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+    NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )
-    """,(datetime.now(),name,backend,TRIALS,BITS,
+    """,(datetime.now(),backend,TRIALS,BITS,
     np.mean(entropy),np.mean(min_e),np.mean(coll),
     np.mean(bias),np.mean(auto),
     np.mean(zeros),np.mean(ones),
@@ -379,7 +327,7 @@ def run_trials(name,bit_func,backend):
 
 def main():
 
-    print("\nMODULE-2 RNG COMPARISON\n")
+    print("\nMODULE-3 HYBRID QRNG\n")
 
     db_setup()
 
@@ -397,12 +345,7 @@ def main():
 
     print("Using:",backend)
 
-    run_trials("QRNG",lambda n:get_bit_string(n),backend)
-    run_trials("LCG",lambda n:get_lcg_bits(n),"LCG")
-    run_trials("PRNG_MersenneTwister",lambda n:get_prng_bits(n),"Python random")
-    run_trials("CSPRNG_secrets",lambda n:get_secrets_bits(n),"Python secrets")
-    run_trials("OS_urandom",lambda n:get_urandom_bits(n),"/dev/urandom")
-    run_trials("AES_CTR_DRBG",lambda n:get_aes_ctr_bits(n),"AES-CTR")
+    run_trials(backend)
 
 
 if __name__=="__main__":

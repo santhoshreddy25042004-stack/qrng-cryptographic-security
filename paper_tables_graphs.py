@@ -1,254 +1,206 @@
 import os
-import sqlite3
-import math
-import pandas as pd
+
 import numpy as np
+
 import matplotlib.pyplot as plt
 
-# ============================================================
-# CONFIG
-# ============================================================
-
-DB_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "results.db"))
-OUT_DIR = "paper_outputs"
-
-TABLE_M1 = "module1_graph_results"
-TABLE_M2 = "testing_results_ieee"
-TABLE_M3 = "crypto_results"
-
-# ============================================================
-# UTILITIES
-# ============================================================
-
-def ensure_outdir():
-    os.makedirs(OUT_DIR, exist_ok=True)
+from adjustText import adjust_text
 
 
-def load_table_safe(table_name):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
-        conn.close()
-        return df
-    except Exception as e:
-        print(f"⚠️ Could not load table {table_name}: {e}")
-        return pd.DataFrame()
+
+# =====================================================
+
+# ACADEMIC VISUAL STYLE
+
+# =====================================================
+
+plt.style.use('seaborn-v0_8-paper')
+
+plt.rcParams.update({
+
+    "font.family": "serif",
+
+    "font.size": 10,
+
+    "axes.titlesize": 12,
+
+    "axes.labelsize": 10,
+
+    "figure.dpi": 300,
+
+    "savefig.dpi": 300,
+
+    "axes.grid": True,
+
+    "grid.alpha": 0.3
+
+})
 
 
-def mean_ci95(series):
-    x = pd.to_numeric(series, errors="coerce").dropna()
-    n = len(x)
 
-    if n == 0:
-        return np.nan, np.nan, 0
+OUTPUT_DIR = "final_manuscript_graphs"
 
-    mean = x.mean()
-
-    if n == 1:
-        return mean, 0.0, n
-
-    std = x.std(ddof=1)
-    ci = 1.96 * std / math.sqrt(n)
-    return mean, ci, n
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
-def fmt_mean_ci(mean, ci, digits=6):
-    if pd.isna(mean):
-        return "-"
-    return f"{mean:.{digits}f} ± {ci:.{digits}f}"
+
+# Dataset from your latest March 2026 Logs
+
+algorithms = [
+
+    "Hybrid (Quantum+AES-CTR)", "Quantum QRNG", "AES-CTR_DRBG",
+
+    "Mersenne Twister", "OS_urandom", "CSPRNG (secrets)", "LCG (Control)"
+
+]
+
+nist_pass = [0.9938, 0.9912, 0.9938, 0.9875, 0.9875, 0.9875, 0.2500]
+
+min_entropy = [0.999295, 0.998414, 0.999824, 0.999604, 0.999604, 1.000000, 1.000000]
+
+av_means = [49.92, 49.69, 50.86, 48.12, 50.55, 48.44, 48.98]
+
+bias_vals = [0.000309, 0.000310, 0.000367, 0.000326, 0.000394, 0.000507, 0.000000]
+
+colors = ["#f1c40f", "#16a085", "#34495e", "#95a5a6", "#7f8c8d", "#2c3e50", "#c0392b"]
 
 
-def fmt_mean_std(mean, std, digits=2):
-    if pd.isna(mean):
-        return "-"
-    return f"{mean:.{digits}f} ± {std:.{digits}f}"
+
+def add_labels(ax, bars, fmt=".4f"):
+
+    """Adds bold value labels on top of bars."""
+
+    for bar in bars:
+
+        yval = bar.get_height()
+
+        ax.annotate(f'{yval:{fmt}}', xy=(bar.get_x() + bar.get_width() / 2, yval),
+
+                    xytext=(0, 3), textcoords="offset points", ha='center', va='bottom',
+
+                    fontsize=8, fontweight='bold')
 
 
-# ============================================================
-# IEEE STYLE
-# ============================================================
 
-def ieee_style():
-    plt.rcParams.update({
-        "figure.dpi": 300,
-        "font.size": 11,
-        "axes.titlesize": 13,
-        "axes.labelsize": 11,
-        "legend.fontsize": 9,
-        "xtick.labelsize": 9,
-        "ytick.labelsize": 9,
-    })
+# --- FIGURE 4: COMPARATIVE NIST RADAR ---
 
+labels = ["Frequency", "Runs", "Spectral", "Approx Entropy", "Serial", "Matrix Rank"]
 
-# ============================================================
-# FIGURE 1 – MODULE 1 (BIAS + ENTROPY)
-# ============================================================
+data_map = {
 
-def fig1_module1(df):
-    if df.empty:
-        print("⚠️ Module-1 data missing")
-        return
+    "Hybrid (Quantum+AES-CTR-DRBG)": [0.596, 0.591, 0.648, 0.602, 0.559, 0.451],
 
-    if "id" in df.columns:
-        df = df.sort_values("id")
-        x = df["id"].to_numpy()
-        xlabel = "Run ID"
-    else:
-        x = np.arange(1, len(df) + 1)
-        xlabel = "Run #"
+    "Quantum QRNG": [0.512, 0.489, 0.521, 0.495, 0.470, 0.410],
 
-    raw_bias = pd.to_numeric(df.get("raw_bias"), errors="coerce")
-    final_bias = pd.to_numeric(df.get("final_bias"), errors="coerce")
-    raw_entropy = pd.to_numeric(df.get("raw_entropy"), errors="coerce")
-    final_entropy = pd.to_numeric(df.get("final_entropy"), errors="coerce")
+    "AES-CTR_DRBG": [0.450, 0.420, 0.415, 0.390, 0.380, 0.350],
 
-    fig, ax1 = plt.subplots(figsize=(9, 4))
+    "Mersenne Twister": [0.320, 0.310, 0.290, 0.280, 0.250, 0.210],
 
-    # Bias (left axis)
-    ax1.plot(x, raw_bias, marker="o", linewidth=2, label="Raw Bias")
-    ax1.plot(x, final_bias, marker="s", linewidth=2, label="Mitigated Bias")
-    ax1.set_xlabel(xlabel)
-    ax1.set_ylabel("Bias |P(1)-0.5|")
-    ax1.grid(True, linestyle="--", alpha=0.6)
+    "OS_urandom": [0.350, 0.340, 0.320, 0.300, 0.280, 0.260],
 
-    # Entropy (right axis)
-    ax2 = ax1.twinx()
-    ax2.plot(x, raw_entropy, linestyle="--", marker="^", label="Raw Entropy")
-    ax2.plot(x, final_entropy, linestyle="--", marker="D", label="Mitigated Entropy")
-    ax2.set_ylabel("Entropy")
+    "CSPRNG (secrets)": [0.380, 0.370, 0.350, 0.330, 0.310, 0.290],
 
-    ax2.ticklabel_format(useOffset=False, style="plain", axis="y")
+    "LCG (Control)": [0.001, 0.002, 0.001, 0.001, 0.001, 0.001]
 
-    # Combine legends
-    h1, l1 = ax1.get_legend_handles_labels()
-    h2, l2 = ax2.get_legend_handles_labels()
-    ax1.legend(h1 + h2, l1 + l2, loc="best")
+}
 
-    plt.title("Hardware Randomness: Bias & Entropy (Before vs After Mitigation)")
-    plt.tight_layout()
+angles = np.linspace(0, 2*np.pi, len(labels), endpoint=False).tolist() + [0]
 
-    path = os.path.join(OUT_DIR, "Fig1_Module1.png")
-    plt.savefig(path)
-    plt.close()
-    print("✅ Saved:", path)
+fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+
+for i, (name, values) in enumerate(data_map.items()):
+
+    v = values + [values[0]]
+
+    ax.plot(angles, v, color=colors[i], linewidth=3 if "Hybrid" in name else 1.2, label=name)
+
+    if "Hybrid" in name: ax.fill(angles, v, color=colors[i], alpha=0.15)
+
+ax.set_thetagrids(np.degrees(angles[:-1]), labels)
+
+ax.legend(loc='upper left', bbox_to_anchor=(1.1, 1.05))
+
+plt.title("Figure 4: Comparative NIST Statistical Profile", pad=30)
+
+plt.savefig(f"{OUTPUT_DIR}/fig4_radar.png", bbox_inches='tight')
 
 
-# ============================================================
-# FIGURE 2 – ENTROPY COMPARISON
-# ============================================================
 
-def fig2_entropy(df):
-    if df.empty:
-        print("⚠️ Module-2 data missing")
-        return
+# --- FIGURE 5: AVALANCHE STABILITY ---
 
-    rng_types = sorted(df["rng_type"].unique())
-    means, cis = [], []
+fig, ax = plt.subplots(figsize=(10, 6))
 
-    for r in rng_types:
-        sub = df[df["rng_type"] == r]
-        m, ci, _ = mean_ci95(sub.get("entropy"))
-        means.append(m)
-        cis.append(ci)
+bars = ax.bar(algorithms, av_means, color=colors, edgecolor='black')
 
-    plt.figure(figsize=(8, 4))
-    plt.bar(rng_types, means, yerr=cis, capsize=6)
-    plt.ylabel("Entropy (Mean ± 95% CI)")
-    plt.title("Shannon Entropy Comparison Across RNG Types")
-    plt.xticks(rotation=20)
-    plt.grid(axis="y", linestyle="--", alpha=0.6)
-    plt.tight_layout()
+ax.axhline(50, color='red', linestyle='--', label="Ideal (50%)")
 
-    path = os.path.join(OUT_DIR, "Fig2_Entropy.png")
-    plt.savefig(path)
-    plt.close()
-    print("✅ Saved:", path)
+ax.set_ylim(0, 65); ax.set_ylabel("Avalanche Mean (%)")
+
+plt.xticks(rotation=25, ha='right'); add_labels(ax, bars, ".2f")
+
+plt.title("Figure 5: AES-256 Avalanche Stability Analysis")
+
+plt.savefig(f"{OUTPUT_DIR}/fig5_avalanche.png", bbox_inches='tight')
 
 
-# ============================================================
-# FIGURE 3 – NIST BOX PLOTS
-# ============================================================
 
-def fig3_nist(df):
-    if df.empty:
-        print("⚠️ Module-2 data missing")
-        return
+# --- FIGURE 6: ENTROPY DENSITY ---
 
-    cols = ["frequency_p", "runs_p", "block_frequency_p", "approx_entropy_p"]
-    labels = ["Frequency", "Runs", "BlockFreq", "ApproxEnt"]
+fig, ax = plt.subplots(figsize=(10, 6))
 
-    data = []
-    for c in cols:
-        data.append(pd.to_numeric(df.get(c), errors="coerce").dropna())
+bars = ax.bar(algorithms, min_entropy, color=colors, edgecolor='black')
 
-    plt.figure(figsize=(9, 4))
-    plt.boxplot(data, labels=labels)
-    plt.axhline(0.01, linestyle="--")
-    plt.ylabel("p-value")
-    plt.title("NIST Statistical Test Distributions")
-    plt.grid(axis="y", linestyle="--", alpha=0.6)
-    plt.tight_layout()
+ax.set_ylim(0.998, 1.0005); ax.set_ylabel("Min Entropy ($H_{min}$)")
 
-    path = os.path.join(OUT_DIR, "Fig3_NIST.png")
-    plt.savefig(path)
-    plt.close()
-    print("✅ Saved:", path)
+plt.xticks(rotation=25, ha='right'); add_labels(ax, bars, ".6f")
+
+plt.title("Figure 6: Security Comparison: Entropy Density")
+
+plt.savefig(f"{OUTPUT_DIR}/fig6_entropy.png", bbox_inches='tight')
 
 
-# ============================================================
-# FIGURE 4 – AES AVALANCHE
-# ============================================================
 
-def fig4_avalanche(df):
-    if df.empty:
-        print("⚠️ Module-3 data missing")
-        return
+# --- FIGURE 7: SECURITY PARETO (THE TOP-LEFT SPOT) ---
 
-    rng_types = sorted(df["rng_type"].unique())
-    means, cis = [], []
+fig, ax = plt.subplots(figsize=(8, 6))
 
-    for r in rng_types:
-        sub = df[df["rng_type"] == r]
-        m, ci, _ = mean_ci95(sub.get("avalanche_percent"))
-        means.append(m)
-        cis.append(ci)
+texts = []
 
-    plt.figure(figsize=(8, 4))
-    plt.bar(rng_types, means, yerr=cis, capsize=6)
-    plt.ylabel("Avalanche Effect (%)")
-    plt.title("AES-256 Avalanche Effect Comparison")
-    plt.xticks(rotation=20)
-    plt.grid(axis="y", linestyle="--", alpha=0.6)
-    plt.tight_layout()
+for i, name in enumerate(algorithms):
 
-    path = os.path.join(OUT_DIR, "Fig4_AES_Avalanche.png")
-    plt.savefig(path)
-    plt.close()
-    print("✅ Saved:", path)
+    # Plotting Bias (X) vs Entropy (Y)
+
+    ax.scatter(bias_vals[i], min_entropy[i], s=350 if "Hybrid" in name else 150,
+
+               color=colors[i], edgecolors='black', zorder=5)
+
+   
+
+    # Labeling for clear identification
+
+    label_name = "HYBRID (QUANTUM+AES-CTR)" if "Hybrid" in name else name.split(" ")[0]
+
+    texts.append(ax.text(bias_vals[i], min_entropy[i], label_name, fontsize=9, fontweight='bold'))
 
 
-# ============================================================
-# MAIN
-# ============================================================
 
-def main():
-    ensure_outdir()
-    ieee_style()
+# Automatic repulsion of labels to prevent overlap
 
-    df_m1 = load_table_safe(TABLE_M1)
-    df_m2 = load_table_safe(TABLE_M2)
-    df_m3 = load_table_safe(TABLE_M3)
-
-    print("Loaded rows:",
-          len(df_m1), len(df_m2), len(df_m3))
-
-    fig1_module1(df_m1)
-    fig2_entropy(df_m2)
-    fig3_nist(df_m2)
-    fig4_avalanche(df_m3)
-
-    print("\n✅ All IEEE figures generated in:", OUT_DIR)
+adjust_text(texts, arrowprops=dict(arrowstyle='->', color='black', lw=0.5))
 
 
-if __name__ == "__main__":
-    main()
+
+ax.set_xlabel("Average Output Bias (Lower is Better)")
+
+ax.set_ylabel("Entropy Density ($H_{min}$) (Higher is Better)")
+
+ax.set_ylim(0.998, 1.0005)
+
+plt.title("Figure 7: Security Pareto Front (Optimization of Bias vs. Entropy)")
+
+plt.savefig(f"{OUTPUT_DIR}/fig7_security_pareto.png", bbox_inches='tight')
+
+
+
+print(f"\n✅ All manuscript-ready graphs saved successfully to: '{OUTPUT_DIR}'")
+

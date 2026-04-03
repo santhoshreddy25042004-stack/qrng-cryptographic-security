@@ -1,30 +1,19 @@
 """
-MODULE-2 : QRNG vs RNG COMPARISON
----------------------------------
-Trials: 20
-Bits per trial: 1,000,000
+MODULE-2 : AES CTR DRBG TEST
+-----------------------------
+Runs AES-CTR DRBG only and stores results in existing database
 """
 
 import os
 import sqlite3
 import numpy as np
 import math
-import random
 import time
-import secrets
 from datetime import datetime
-from dotenv import load_dotenv
 from scipy.stats import chisquare
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-
-from qrng.quantum_rng import (
-    set_provider_as_IBMQ,
-    set_backend_interactive,
-    get_backend_name,
-    get_bit_string
-)
 
 from randomness_testsuite.FrequencyTest import FrequencyTest
 from randomness_testsuite.RunTest import RunTest
@@ -36,109 +25,28 @@ from randomness_testsuite.Matrix import Matrix
 from randomness_testsuite.Complexity import ComplexityTest
 
 
-DB_FILE="results.db"
-TABLE="final_results"
+DB_FILE = "results.db"
+TABLE = "final_results"
 
 
 # =========================================================
-# DATABASE
+# AES CTR RNG
 # =========================================================
-
-def db_setup():
-
-    conn=sqlite3.connect(DB_FILE,timeout=30)
-    cur=conn.cursor()
-
-    cur.execute(f"""
-    CREATE TABLE IF NOT EXISTS {TABLE}(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    time TEXT,
-    rng TEXT,
-    backend TEXT,
-    trials INTEGER,
-    bits_per_trial INTEGER,
-    avg_entropy REAL,
-    avg_min_entropy REAL,
-    avg_collision_entropy REAL,
-    avg_bias REAL,
-    avg_autocorrelation REAL,
-    avg_zeros REAL,
-    avg_ones REAL,
-    avg_freq_p REAL,
-    avg_runs_p REAL,
-    avg_apen_p REAL,
-    avg_serial_p REAL,
-    avg_fft_p REAL,
-    avg_cusum_p REAL,
-    avg_matrix_p REAL,
-    avg_complexity_p REAL,
-    nist_pass_rate REAL,
-    chi_square_p REAL,
-    predictability REAL,
-    avg_generation_time REAL
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-
-# =========================================================
-# RNG IMPLEMENTATIONS
-# =========================================================
-
-def seed_prng():
-    random.seed(int.from_bytes(os.urandom(8),"big"))
-
-
-def get_prng_bits(n):
-    return "".join(str(random.getrandbits(1)) for _ in range(n))
-
-
-def get_secrets_bits(n):
-    return "".join(str(secrets.randbits(1)) for _ in range(n))
-
-
-def get_urandom_bits(n):
-    data=os.urandom(n)
-    return "".join(format(b,"08b") for b in data)[:n]
-
-
-# ---------- LCG (weak RNG)
-
-def get_lcg_bits(n):
-
-    a=1664525
-    c=1013904223
-    m=2**32
-
-    x=int.from_bytes(os.urandom(4),"big")
-
-    bits=[]
-
-    for _ in range(n):
-        x=(a*x+c)%m
-        bits.append(str(x&1))
-
-    return "".join(bits)
-
-
-# ---------- AES CTR DRBG
 
 def get_aes_ctr_bits(n):
 
-    key=os.urandom(16)
-    nonce=os.urandom(16)
+    key = os.urandom(16)
+    nonce = os.urandom(16)
 
-    cipher=Cipher(
+    cipher = Cipher(
         algorithms.AES(key),
         modes.CTR(nonce),
         backend=default_backend()
     )
 
-    encryptor=cipher.encryptor()
+    encryptor = cipher.encryptor()
 
-    data=encryptor.update(os.urandom(n))+encryptor.finalize()
+    data = encryptor.update(os.urandom(n)) + encryptor.finalize()
 
     return "".join(format(b,"08b") for b in data)[:n]
 
@@ -149,50 +57,53 @@ def get_aes_ctr_bits(n):
 
 def shannon_entropy(bits):
 
-    zeros=bits.count("0")
-    ones=bits.count("1")
-    n=len(bits)
+    zeros = bits.count("0")
+    ones = bits.count("1")
 
-    p0=zeros/n
-    p1=ones/n
+    p0 = zeros/len(bits)
+    p1 = ones/len(bits)
 
-    H=0
-    if p0>0: H-=p0*math.log2(p0)
-    if p1>0: H-=p1*math.log2(p1)
+    H = 0
+
+    if p0>0:
+        H -= p0*math.log2(p0)
+
+    if p1>0:
+        H -= p1*math.log2(p1)
 
     return H
 
 
 def nist_min_entropy(bits):
 
-    n=len(bits)
-    pmax=max(bits.count("0"),bits.count("1"))/n
+    pmax = max(bits.count("0"),bits.count("1"))/len(bits)
+
     return -math.log2(pmax)
 
 
 def collision_entropy(bits):
 
-    zeros=bits.count("0")
-    ones=bits.count("1")
-    n=len(bits)
+    zeros = bits.count("0")
+    ones = bits.count("1")
 
-    p0=zeros/n
-    p1=ones/n
+    p0 = zeros/len(bits)
+    p1 = ones/len(bits)
 
     return -math.log2(p0*p0+p1*p1)
 
 
 # =========================================================
-# BIAS + AUTOCORR
+# STATISTICS
 # =========================================================
 
 def bit_bias(bits):
+
     return abs((bits.count("0")/len(bits))-0.5)
 
 
 def autocorrelation(bits):
 
-    arr=np.array([int(b) for b in bits])
+    arr = np.array([int(b) for b in bits])
 
     if np.std(arr)==0:
         return 0
@@ -200,37 +111,29 @@ def autocorrelation(bits):
     return float(np.corrcoef(arr[:-1],arr[1:])[0,1])
 
 
-# =========================================================
-# CHI SQUARE
-# =========================================================
-
 def chi_square_test(bits):
 
-    zeros=bits.count("0")
-    ones=bits.count("1")
+    zeros = bits.count("0")
+    ones = bits.count("1")
 
-    chi,p=chisquare([zeros,ones],[len(bits)/2,len(bits)/2])
+    chi,p = chisquare([zeros,ones],[len(bits)/2,len(bits)/2])
 
     return p
 
 
-# =========================================================
-# PREDICTABILITY
-# =========================================================
-
 def predictability_test(bits):
 
-    observe=bits[:1000]
-    target=bits[1000:2000]
+    observe = bits[:1000]
+    target = bits[1000:2000]
 
-    correct=0
+    correct = 0
 
     for i in range(len(target)):
 
-        if observe[-1]==target[i]:
-            correct+=1
+        if observe[-1] == target[i]:
+            correct += 1
 
-        observe+=target[i]
+        observe += target[i]
 
     return correct/len(target)
 
@@ -251,10 +154,10 @@ def extract_p(x):
 # RUN TRIALS
 # =========================================================
 
-def run_trials(name,bit_func,backend):
+def run_trials():
 
-    TRIALS=20
-    BITS=1000000
+    TRIALS = 20
+    BITS = 1000000
 
     entropy=[]
     min_e=[]
@@ -278,15 +181,14 @@ def run_trials(name,bit_func,backend):
     zeros=[]
     ones=[]
 
-    print("\nRunning:",name,"\n")
+    print("\nRunning: AES_CTR_DRBG\n")
 
     for t in range(TRIALS):
 
-        if name=="PRNG_MersenneTwister":
-            seed_prng()
-
         start=time.time()
-        bits=bit_func(BITS)
+
+        bits=get_aes_ctr_bits(BITS)
+
         end=time.time()
 
         times.append(end-start)
@@ -295,8 +197,8 @@ def run_trials(name,bit_func,backend):
         ones.append(bits.count("1"))
 
         H=shannon_entropy(bits)
-        entropy.append(H)
 
+        entropy.append(H)
         min_e.append(nist_min_entropy(bits))
         coll.append(collision_entropy(bits))
 
@@ -332,6 +234,7 @@ def run_trials(name,bit_func,backend):
 
         print("Trial",t+1,"Entropy:",round(H,10),"PassRate:",round(pass_rate,3))
 
+
     print("\n==============================")
     print("FINAL AVERAGE RESULTS")
     print("==============================")
@@ -353,6 +256,7 @@ def run_trials(name,bit_func,backend):
 
     print("==============================\n")
 
+
     conn=sqlite3.connect(DB_FILE)
     cur=conn.cursor()
 
@@ -360,7 +264,7 @@ def run_trials(name,bit_func,backend):
     INSERT INTO {TABLE} VALUES (
     NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )
-    """,(datetime.now(),name,backend,TRIALS,BITS,
+    """,(datetime.now(),"AES_CTR_DRBG","AES-CTR",TRIALS,BITS,
     np.mean(entropy),np.mean(min_e),np.mean(coll),
     np.mean(bias),np.mean(auto),
     np.mean(zeros),np.mean(ones),
@@ -377,33 +281,6 @@ def run_trials(name,bit_func,backend):
 # MAIN
 # =========================================================
 
-def main():
-
-    print("\nMODULE-2 RNG COMPARISON\n")
-
-    db_setup()
-
-    load_dotenv()
-
-    token=os.getenv("IBM_API_KEY")
-
-    set_provider_as_IBMQ(token)
-
-    print("Select IBM backend")
-
-    set_backend_interactive()
-
-    backend=get_backend_name()
-
-    print("Using:",backend)
-
-    run_trials("QRNG",lambda n:get_bit_string(n),backend)
-    run_trials("LCG",lambda n:get_lcg_bits(n),"LCG")
-    run_trials("PRNG_MersenneTwister",lambda n:get_prng_bits(n),"Python random")
-    run_trials("CSPRNG_secrets",lambda n:get_secrets_bits(n),"Python secrets")
-    run_trials("OS_urandom",lambda n:get_urandom_bits(n),"/dev/urandom")
-    run_trials("AES_CTR_DRBG",lambda n:get_aes_ctr_bits(n),"AES-CTR")
-
-
 if __name__=="__main__":
-    main()
+
+    run_trials()

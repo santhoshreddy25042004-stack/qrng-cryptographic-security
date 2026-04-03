@@ -1,4 +1,4 @@
-# qrng/main.py  ✅ FINAL READY IEEE VERSION (WITH MODULE-1 DB SAVE)
+# qrng/main.py  ✅ FINAL READY VERSION (MODULE-1 GRAPH DATA STORAGE)
 
 import os
 import sqlite3
@@ -17,246 +17,242 @@ from .quantum_rng import (
 )
 
 # =========================================================
-# ✅ Module-1 DB storage (Bias + Entropy BEFORE/AFTER)
+# DATABASE CONFIG
 # =========================================================
 
-# ✅ Always store results.db in project root (not current folder)
 DB_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "results.db"))
 TABLE_M1_GRAPH = "module1_graph_results"
 
 
+# =========================================================
+# CREATE TABLE
+# =========================================================
+
 def ensure_module1_graph_table():
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
+
     cur.execute(f"""
     CREATE TABLE IF NOT EXISTS {TABLE_M1_GRAPH} (
+
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         time TEXT,
         backend TEXT,
         shots INTEGER,
         n_final_bits INTEGER,
+
+        raw_zeros INTEGER,
+        raw_ones INTEGER,
+        final_zeros INTEGER,
+        final_ones INTEGER,
+
         raw_bias REAL,
         final_bias REAL,
+
         raw_entropy REAL,
-        final_entropy REAL
+        final_entropy REAL,
+
+        raw_freq_p REAL,
+        raw_runs_p REAL,
+
+        final_freq_p REAL,
+        final_runs_p REAL,
+
+        efficiency REAL
     )
     """)
+
     conn.commit()
     conn.close()
 
 
-def save_module1_graph_row(backend, shots, n_final_bits, before, after):
-    """
-    before = dict from report_metrics(raw_bits)
-    after  = dict from report_metrics(final_bits)
-    """
+# =========================================================
+# SAVE DATA
+# =========================================================
+
+def save_module1_graph_row(backend, shots, n_final_bits, before, after, stats):
+
     ensure_module1_graph_table()
+
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
 
+    efficiency = None
+    if stats and stats.get("efficiency") is not None:
+        efficiency = stats["efficiency"]
+
     cur.execute(f"""
     INSERT INTO {TABLE_M1_GRAPH} (
+
         time, backend, shots, n_final_bits,
-        raw_bias, final_bias, raw_entropy, final_entropy
-    ) VALUES (?,?,?,?,?,?,?,?)
+
+        raw_zeros, raw_ones,
+        final_zeros, final_ones,
+
+        raw_bias, final_bias,
+
+        raw_entropy, final_entropy,
+
+        raw_freq_p, raw_runs_p,
+        final_freq_p, final_runs_p,
+
+        efficiency
+    )
+
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
+
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        str(backend),
-        int(shots),
-        int(n_final_bits),
-        float(before["bias"]),
-        float(after["bias"]),
-        float(before["entropy"]),
-        float(after["entropy"]),
+        backend,
+        shots,
+        n_final_bits,
+
+        before["zeros"],
+        before["ones"],
+        after["zeros"],
+        after["ones"],
+
+        before["bias"],
+        after["bias"],
+
+        before["entropy"],
+        after["entropy"],
+
+        before.get("freq_p_value"),
+        before.get("runs_p_value"),
+        after.get("freq_p_value"),
+        after.get("runs_p_value"),
+
+        efficiency
     ))
 
     conn.commit()
     conn.close()
-    print(f"✅ Module-1 graph data saved to DB table: {TABLE_M1_GRAPH}")
+
+    print(f"✅ Module-1 data stored in DB table: {TABLE_M1_GRAPH}")
 
 
 # =========================================================
-# Printing
+# PRINT METRICS
 # =========================================================
-def _print_metrics_block(title: str, m: dict):
+
+def print_metrics(title, m):
+
     print(f"\n========== {title} ==========")
-    print(f"Length      : {m.get('length')}")
-    print(f"Zeros       : {m.get('zeros')}")
-    print(f"Ones        : {m.get('ones')}")
-    print(f"P(0)        : {m.get('p0')}")
-    print(f"P(1)        : {m.get('p1')}")
-    print(f"Bias        : {m.get('bias')}")
-    print(f"Entropy     : {m.get('entropy')}")
-    if "freq_p_value" in m:
-        print(f"Freq p-value: {m.get('freq_p_value')}")
-    if "runs_p_value" in m:
-        print(f"Runs p-value: {m.get('runs_p_value')}")
 
+    print(f"Length      : {m['length']}")
+    print(f"Zeros       : {m['zeros']}")
+    print(f"Ones        : {m['ones']}")
+    print(f"P(0)        : {m['p0']}")
+    print(f"P(1)        : {m['p1']}")
+    print(f"Bias        : {m['bias']}")
+    print(f"Entropy     : {m['entropy']}")
+
+    if "freq_p_value" in m:
+        print(f"Freq p-value: {m['freq_p_value']}")
+
+    if "runs_p_value" in m:
+        print(f"Runs p-value: {m['runs_p_value']}")
+
+
+# =========================================================
+# MAIN
+# =========================================================
 
 def main():
-    print("🔑 qRNG — Quantum Random Number Generator (Final IEEE Version)\n")
 
-    # -------------------------------------------------
-    # Load IBM token
-    # -------------------------------------------------
+    print("\n🔑 Quantum Random Number Generator (Module-1)\n")
+
     token = os.getenv("IBM_API_KEY")
-    if token:
-        print("✅ Loaded IBM API key from .env")
-    else:
-        token = input("Enter IBM Quantum API token (or press Enter for simulator): ").strip()
 
-    # -------------------------------------------------
-    # Setup provider + backend
-    # -------------------------------------------------
+    if not token:
+        token = input("Enter IBM Quantum API key (or press Enter for simulator): ")
+
     set_provider_as_IBMQ(token if token else None)
     set_backend_interactive()
 
-    # -------------------------------------------------
-    # Print backend info
-    # -------------------------------------------------
-    print("\n========== BACKEND INFORMATION ==========")
-    print(f"✅ Backend Selected: {get_backend_name()}")
+    print("\n========== BACKEND ==========")
+    print("Backend:", get_backend_name())
 
-    ro_backend = get_readout_error_rate()
-    if ro_backend is not None:
-        print("✅ Readout Error (Hardware Noise):")
-        print(f"   Avg Readout Error: {ro_backend['avg_readout_error']}")
-        print(f"   Min Readout Error: {ro_backend['min_readout_error']}")
-        print(f"   Max Readout Error: {ro_backend['max_readout_error']}")
-    else:
-        print("⚠️ Readout error not accessible from IBM API for this backend/plan.")
-        print("✅ Noise will be measured using calibration circuits in option 5.")
+    ro = get_readout_error_rate()
 
-    # -------------------------------------------------
-    # Menu
-    # -------------------------------------------------
-    print("\nChoose output type:")
-    print("1. 32-bit integer (show bits)")
-    print("2. 64-bit integer (show bits)")
-    print("3. Float (0–1) (show bits)")
-    print("4. Double (0–1) (show bits)")
-    print("5. Hardware Noise & Randomness Analysis (Before vs After Mitigation)")
+    if ro:
+        print("Avg readout error:", ro["avg_readout_error"])
 
-    choice = input("\nEnter your choice (1–5): ").strip()
-    print("\n🎲 Generating quantum output...\n")
+    print("\nChoose option:")
+    print("1. 32-bit integer")
+    print("2. 64-bit integer")
+    print("3. Float")
+    print("4. Double")
+    print("5. Noise & Randomness Analysis")
 
-    # -------------------------------------------------
-    # OUTPUTS
-    # -------------------------------------------------
-    if choice == "1":
-        raw_bits = get_raw_bit_string(64)
-        final_bits = get_bit_string(32, True)
-        number = int(final_bits, 2)
+    choice = input("\nEnter choice (1-5): ")
 
-        print(f"🧩 RAW bits (64):   {raw_bits}")
-        print(f"✅ FINAL bits (32): {final_bits}")
-        print(f"🔹 32-bit integer:  {number}")
+    # -----------------------------------------------------
 
-    elif choice == "2":
-        raw_bits = get_raw_bit_string(128)
-        final_bits = get_bit_string(64, True)
-        number = int(final_bits, 2)
+    if choice == "5":
 
-        print(f"🧩 RAW bits (128):  {raw_bits}")
-        print(f"✅ FINAL bits (64): {final_bits}")
-        print(f"🔹 64-bit integer:  {number}")
-
-    elif choice == "3":
-        bits = get_bit_string(32, True)
-        value = int(bits, 2) / (2**32)
-
-        print(f"✅ FINAL bits (32): {bits}")
-        print(f"🔹 Float (0–1):     {value}")
-
-    elif choice == "4":
-        bits = get_bit_string(64, True)
-        value = int(bits, 2) / (2**64)
-
-        print(f"✅ FINAL bits (64): {bits}")
-        print(f"🔹 Double (0–1):    {value}")
-
-    elif choice == "5":
-        # ✅ IEEE MODULE-1 FINAL ANALYSIS
         from .noise_bias_analysis import report_metrics
         from .calibration_noise import estimate_bit_flip_probabilities
         from .quantum_rng import _backend
 
-        # ✅ Ask FINAL bits (not raw bits)
-        n = int(input("How many FINAL bits? (Example: 10000): ").strip() or "10000")
+        n = int(input("How many FINAL bits? (example 10000): ") or "10000")
 
-        # -------------------------------------------------
-        # (1) TRUE Hardware Noise Calibration
-        # -------------------------------------------------
-        print("\n========== HARDWARE CALIBRATION (TRUE NOISE) ==========")
+        print("\n========== HARDWARE CALIBRATION ==========")
+
         noise = estimate_bit_flip_probabilities(_backend, shots=8192)
 
-        print(f"Shots used: {noise['shots']}")
-        print(f"P(0→1) = {noise['p01']}")
-        print(f"P(1→0) = {noise['p10']}")
-        print(f"Estimated Readout Error = {noise['readout_error_estimate']}")
+        print("Shots:", noise["shots"])
+        print("P(0→1):", noise["p01"])
+        print("P(1→0):", noise["p10"])
 
         # -------------------------------------------------
-        # (2) BEFORE (RAW) bits
-        # -------------------------------------------------
+
         raw_bits = get_raw_bit_string(n)
 
-        # -------------------------------------------------
-        # (3) AFTER extractor: fixed length + collect efficiency stats
-        # -------------------------------------------------
         final_bits, stats = get_bit_string(n, True, return_stats=True)
 
         before = report_metrics(raw_bits)
         after = report_metrics(final_bits)
 
         # -------------------------------------------------
-        # (4) Before vs After results (Formatted IEEE Print)
+
+        print_metrics("RAW METRICS", before)
+        print_metrics("FINAL METRICS", after)
+
+        print("\n========== SUMMARY ==========")
+
+        print("Bias BEFORE :", before["bias"])
+        print("Bias AFTER  :", after["bias"])
+
+        print("Entropy BEFORE :", before["entropy"])
+        print("Entropy AFTER  :", after["entropy"])
+
         # -------------------------------------------------
-        _print_metrics_block("BEFORE (RAW) METRICS", before)
-        _print_metrics_block("AFTER (EXTRACTED / MITIGATION) METRICS", after)
 
-        print("\n========== SUMMARY COMPARISON ==========")
-        print(f"Bias BEFORE     : {before['bias']}")
-        print(f"Bias AFTER      : {after['bias']}")
-        print(f"Entropy BEFORE  : {before['entropy']}")
-        print(f"Entropy AFTER   : {after['entropy']}")
-        print(f"Freq p BEFORE   : {before.get('freq_p_value')}")
-        print(f"Freq p AFTER    : {after.get('freq_p_value')}")
-        print(f"Runs p BEFORE   : {before.get('runs_p_value')}")
-        print(f"Runs p AFTER    : {after.get('runs_p_value')}")
-
-        # ✅ Save Module-1 data to DB for Fig1 (two-axes)
         save_module1_graph_row(
             backend=get_backend_name(),
             shots=noise["shots"],
             n_final_bits=n,
             before=before,
-            after=after
+            after=after,
+            stats=stats
         )
 
         # -------------------------------------------------
-        # (5) Length + extractor efficiency (IEEE IMPORTANT)
-        # -------------------------------------------------
-        print("\n========== LENGTH / EFFICIENCY ==========")
-        print(f"Raw length (for BEFORE)        : {len(raw_bits)}")
-        print(f"Extracted length (FINAL bits)  : {len(final_bits)}")
 
-        if stats and stats.get("raw_bits_used") is not None:
-            print(f"Raw bits used to generate FINAL: {stats['raw_bits_used']}")
-            if stats.get("efficiency") is not None:
-                print(f"Von Neumann efficiency         : {stats['efficiency']:.4f}")
+        print("\n========== EXTRACTOR EFFICIENCY ==========")
 
-        # -------------------------------------------------
-        # (6) Sample bits proof
-        # -------------------------------------------------
-        print("\n🧩 RAW bits (first 256):")
-        print(raw_bits[:256])
+        print("Raw bits used :", stats["raw_bits_used"])
 
-        print("\n✅ FINAL bits (first 256):")
-        print(final_bits[:256])
+        if stats.get("efficiency"):
+            print("Efficiency :", stats["efficiency"])
 
-    else:
-        print("❌ Invalid choice. Please enter 1–5.")
+        print("\nRAW bits sample:\n", raw_bits[:256])
+        print("\nFINAL bits sample:\n", final_bits[:256])
 
+
+# =========================================================
 
 if __name__ == "__main__":
     main()

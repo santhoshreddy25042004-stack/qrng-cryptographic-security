@@ -1,73 +1,180 @@
-# view_module2_results.py
 import sqlite3
-import pandas as pd
 
 DB_FILE = "results.db"
-TABLE = "testing_results_ieee"
 
+conn = sqlite3.connect(DB_FILE)
+cur = conn.cursor()
 
-def load_table():
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query(f"SELECT * FROM {TABLE}", conn)
-    conn.close()
-    return df
+print("\n==============================")
+print("📊 MODULE-2 DATABASE SUMMARY")
+print("==============================")
 
+# -----------------------------
+# SUMMARY FROM final_results
+# -----------------------------
 
-def print_db_summary(df):
-    print("\n==============================")
-    print("📊 MODULE-2 DATABASE SUMMARY")
-    print("==============================")
+cur.execute("""
+SELECT rng, backend, COUNT(*)
+FROM final_results
+GROUP BY rng, backend
+""")
 
-    if df.empty:
-        print("⚠️ No rows found in Module-2 table.")
-        return
+for rng, backend, count in cur.fetchall():
 
-    for rng_type in sorted(df["rng_type"].unique()):
-        sub = df[df["rng_type"] == rng_type]
-        backend = str(sub["backend"].iloc[0]) if "backend" in sub.columns else "Unknown"
-        print(f"RNG TYPE: {rng_type:<20} | BACKEND: {backend:<15} | Trials: {len(sub)}")
+    print(f"RNG TYPE: {rng:25} | BACKEND: {backend:20} | EXPERIMENTS: {count}")
 
+# -----------------------------
+# SUMMARY FROM hybrid_results
+# -----------------------------
 
-def print_latest_results(df, rng_type, n=3):
-    sub = df[df["rng_type"] == rng_type].sort_values("id", ascending=False).head(n)
+cur.execute("""
+SELECT backend, COUNT(*)
+FROM hybrid_results
+GROUP BY backend
+""")
+
+for backend, count in cur.fetchall():
+
+    print(f"RNG TYPE: {'HYBRID_QRNG_AES':25} | BACKEND: {backend:20} | EXPERIMENTS: {count}")
+
+# ==========================================================
+# FUNCTION TO PRINT RESULTS
+# ==========================================================
+
+def print_result(row, hybrid=False):
 
     print("\n====================================================")
-    print(f"📌 LATEST RESULTS FOR: {rng_type.upper()}")
+
+    if hybrid:
+        print("📌 LATEST RESULTS FOR: HYBRID_QRNG_AES")
+    else:
+        print(f"📌 LATEST RESULTS FOR: {row[2]}")
+
     print("====================================================\n")
 
-    for _, row in sub.iterrows():
-        print(f"ID                : {row.get('id')}")
-        print(f"TIME              : {row.get('time')}")
-        print(f"RNG TYPE          : {row.get('rng_type')}")
-        print(f"BACKEND           : {row.get('backend')}")
-        print(f"TRIAL             : {row.get('trial')}")
-        print(f"BIT LENGTH        : {row.get('bit_length')}\n")
+    if hybrid:
+        (
+            id_,
+            time,
+            backend,
+            trials,
+            bits,
+            entropy,
+            min_entropy,
+            collision,
+            bias,
+            autocorr,
+            zeros,
+            ones,
+            freq,
+            runs,
+            apen,
+            serial,
+            fft,
+            cusum,
+            matrix,
+            complexity,
+            pass_rate,
+            chi,
+            pred,
+            gen_time
+        ) = row
 
-        print(f"ENTROPY           : {row.get('entropy')}")
-        print(f"ZEROS             : {row.get('zeros')}")
-        print(f"ONES              : {row.get('ones')}\n")
+        rng = "HYBRID_QRNG_AES"
 
-        print(f"CHI-SQUARE        : {row.get('chi_square')}")
-        print(f"CHI PASS          : {bool(row.get('chi_square_pass'))}\n")
+    else:
+        (
+            id_,
+            time,
+            rng,
+            backend,
+            trials,
+            bits,
+            entropy,
+            min_entropy,
+            collision,
+            bias,
+            autocorr,
+            zeros,
+            ones,
+            freq,
+            runs,
+            apen,
+            serial,
+            fft,
+            cusum,
+            matrix,
+            complexity,
+            pass_rate,
+            chi,
+            pred,
+            gen_time
+        ) = row
 
-        print(f"FREQ P-VALUE      : {row.get('frequency_p')}")
-        print(f"RUNS P-VALUE      : {row.get('runs_p')}")
-        print(f"BLOCK FREQ P-VALUE: {row.get('block_frequency_p')}")
-        print(f"APPROX ENT P-VALUE: {row.get('approx_entropy_p')}")
-        print("------------------------------\n")
+    print("ID                :", id_)
+    print("TIME              :", time)
+    print("RNG               :", rng)
+    print("BACKEND           :", backend)
+    print("TRIALS            :", trials)
+    print("BITS PER TRIAL    :", f"{bits:,}")
+    print("TOTAL BITS        :", f"{bits*trials:,}")
+
+    print("\n------ RANDOMNESS METRICS ------")
+    print("AVG ENTROPY       :", entropy)
+    print("AVG MIN ENTROPY   :", min_entropy)
+    print("COLLISION ENTROPY :", collision)
+    print("BIAS              :", bias)
+    print("AUTOCORRELATION   :", autocorr)
+
+    print("\n------ BIT DISTRIBUTION ------")
+    print("AVG ZEROS         :", int(zeros))
+    print("AVG ONES          :", int(ones))
+
+    print("\n------ NIST TEST RESULTS ------")
+    print("FREQUENCY TEST P  :", freq)
+    print("RUNS TEST P       :", runs)
+    print("APPROX ENT P      :", apen)
+    print("SERIAL TEST P     :", serial)
+    print("SPECTRAL TEST P   :", fft)
+    print("CUSUM TEST P      :", cusum)
+    print("MATRIX TEST P     :", matrix)
+    print("COMPLEXITY TEST P :", complexity)
+
+    print("\n------ SUMMARY METRICS ------")
+    print("NIST PASS RATE    :", pass_rate)
+    print("CHI SQUARE P      :", chi)
+    print("PREDICTABILITY    :", pred)
+
+    print("\n------ PERFORMANCE ------")
+    print("AVG GEN TIME (s)  :", gen_time)
+
+    print("\n------------------------------")
 
 
-def main():
-    df = load_table()
+# ==========================================================
+# SHOW LATEST FROM final_results
+# ==========================================================
 
-    print_db_summary(df)
+cur.execute("""
+SELECT *
+FROM final_results
+ORDER BY id DESC
+""")
 
-    if df.empty:
-        return
+for row in cur.fetchall():
+    print_result(row)
 
-    for rng_type in sorted(df["rng_type"].unique()):
-        print_latest_results(df, rng_type, n=3)
+# ==========================================================
+# SHOW LATEST FROM hybrid_results
+# ==========================================================
 
+cur.execute("""
+SELECT *
+FROM hybrid_results
+ORDER BY id DESC
+""")
 
-if __name__ == "__main__":
-    main()
+for row in cur.fetchall():
+    print_result(row, hybrid=True)
+
+conn.close()
